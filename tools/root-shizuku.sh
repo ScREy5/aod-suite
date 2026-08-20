@@ -31,12 +31,21 @@ STARTER=$(adb shell 'ls /data/app/*/moe.shizuku.privileged.api-*/lib/arm64/libsh
 adb shell "$STARTER"
 
 sleep 2
-if adb shell 'ps -A -o USER,NAME | grep -q "^root .*shizuku_server"'; then
-    echo "OK: Shizuku server is running as root."
-else
+SPID=$(adb shell 'pgrep -f shizuku_server | head -1' | tr -d '\r')
+if [[ -z "$SPID" ]]; then
     echo "WARNING: could not confirm shizuku_server running as root — check the starter output above."
     exit 1
 fi
+
+# The starter leaves shizuku_server in a per-pid cgroup (memory /apps/uid_0/pid_*),
+# which Android's libprocessgroup reaps during idle/doze — that is why Shizuku "keeps
+# stopping" mid-session. Move it into the root cgroups so nothing reaps it (same fix as
+# the AOD watcher). This makes it persist for the rest of the boot; a reboot still needs
+# this script again (a locked bootloader rules out root-on-boot).
+for c in /dev/memcg /dev/cpuset /dev/stune /dev/cpuctl /dev/blkio; do
+    adb shell "echo $SPID > $c/cgroup.procs 2>/dev/null" || true
+done
+echo "OK: Shizuku server is running as root (pid $SPID), moved to root cgroups."
 
 # 2. AOD brightness watcher. It records its own pid to a pidfile (so we can stop it
 # without `pkill -f`, which would also match this launching command line). Its first
