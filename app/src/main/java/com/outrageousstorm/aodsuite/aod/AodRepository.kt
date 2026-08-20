@@ -59,35 +59,22 @@ class AodRepository(private val cacheDir: File, private val cr: ContentResolver)
     // watcher that reasserts the target each time the system resets it.
     private val aodBacklightNode = "/sys/class/backlight/sprd_backlight/brightness"
     private val aodTargetFile = "/data/local/tmp/aod_suite_brightness"
-    private val aodDozeDefault = 6  // raw backlight the system sets on doze entry
 
+    // Persistence is handled by the AOD watcher thread inside ShellService (the Shizuku daemon
+    // user service). Here we only record the target and apply it immediately if already in AOD.
     suspend fun setMinBrightness(percent: Int): ShellResult = withContext(Dispatchers.IO) {
         val clamped = percent.coerceIn(1, 100)
         val raw = (clamped * 255 / 100).coerceAtLeast(1)
         val uid = ShizukuHelper.exec("id -u")
         if (uid.stdout.trim() != "0")
-            return@withContext ShellResult("", "Shizuku is not running as root — run 'adb root', restart Shizuku, then reopen the app", 1)
+            return@withContext ShellResult("", "Shizuku is not running as root — run tools/root-shizuku.sh, then reopen the app", 1)
         val r = ShizukuHelper.exec(
             "echo $raw > $aodTargetFile && " +
             "if dumpsys display | grep -q 'mGlobalDisplayState=DOZE'; then echo $raw > $aodBacklightNode; fi"
         )
         if (!r.success) return@withContext r
-        ensureAodWatcher()
-        ShellResult("$clamped%", "", 0)
-    }
-
-    private suspend fun ensureAodWatcher() {
-        // setsid detaches the loop from the Shizuku user-service process group so it survives
-        // the app closing. It exits when the target file is removed.
-        ShizukuHelper.exec(
-            "pgrep -f aod_suite_watcher_v1 >/dev/null 2>&1 || " +
-            "setsid sh -c '" +
-            "while [ -f $aodTargetFile ]; do " +
-            "t=${'$'}(cat $aodTargetFile 2>/dev/null); v=${'$'}(cat $aodBacklightNode 2>/dev/null); " +
-            "if [ -n \"${'$'}t\" ] && [ \"${'$'}v\" = \"$aodDozeDefault\" ] && [ \"${'$'}t\" != \"$aodDozeDefault\" ]; then " +
-            "dumpsys display 2>/dev/null | grep -q mGlobalDisplayState=DOZE && echo ${'$'}t > $aodBacklightNode; " +
-            "fi; sleep 3; done' aod_suite_watcher_v1 </dev/null >/dev/null 2>&1 &"
-        )
+        // The backlight only takes effect in AOD, so nothing changes on-screen right now.
+        ShellResult("Set — applies when the watch is in AOD", "", 0)
     }
 
     // ── Gestures ─────────────────────────────────────────────────────────────
